@@ -9,16 +9,6 @@
     "__v": 0,
     "socketId": ""
 }, {
-    "hash": "cb4dd2135bea9b281be52d1d0098cd26",
-    "salt": "d447a224592bd1600d0593e89a0550cd",
-    "username": "bar",
-    "email": "bar@mail.com",
-    "allGames": [],
-    "scores": 0,
-    "status": "offline",
-    "__v": 0,
-    "socketId": ""
-}, {
     "hash": "3a76fae80c8744f0dea1156e1043798d",
     "salt": "2169ffee651b522a75ef712295149175",
     "username": "rar",
