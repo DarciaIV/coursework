@@ -1,2 +1,1 @@
-var chess = require('./chess')
-Fuck it
+var chess = require('./chess');
