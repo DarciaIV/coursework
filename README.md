@@ -1,4 +1,4 @@
-Before anything: run `npm install` inside project directory
+Before anything: install bzip2 and run `npm install` inside project directory
 
 ## Build
 
