@@ -1,6 +1,6 @@
 var assert = require("assert");
 var request = require("request");
-var baseUrl = "http://nodejs-chess.eucalyptus.local:8081/api/game";
+var baseUrl = "http://10.10.229.241:8081/api/game";
 
 var checkMoveOptions = {
   url: baseUrl + "/checkmove",
