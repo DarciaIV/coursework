@@ -48,7 +48,7 @@ var html = {
 
 var env = Object.assign({
   NODE_ENV: 'development',
-  API_URL: '//nodejs-chess.eucalyptus.local:8081'
+  API_URL: '//10.10.229.241:8081'
 }, process.env);
 
 module.exports = {
