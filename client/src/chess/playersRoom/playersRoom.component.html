@@ -1,8 +1,8 @@
 <div class="container">
   <div class="row text-center">
-    <h1>Players room</h1>
+    <h1>Client Room</h1>
     <h4 ng-hide="$ctrl.isOnline()" class="text-danger">Can't connect to game socket! Server is not running or your internet connection is bad :(</h4>
-    <h4 ng-show="$ctrl.isOnline()" class="text-success">Connected :)</h4>
+    <h4 ng-show="$ctrl.isOnline()" class="text-success">Connected as {{user.name}}  :)</h4>
   </div>
 
   <div class="row">
@@ -10,7 +10,7 @@
       <table class="table">
         <col width="50%">
         <col width="50%">
-        <caption class="text-center">Players online</caption>
+        <caption class="text-center">Other clients online</caption>
         <tr ng-repeat="user in $ctrl.usersOnline()">
           <td><span>{{user.name}}</span></td>
           <td>
