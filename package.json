@@ -10,8 +10,7 @@
     "client": "gulp start",
     "test-client": "karma start test/client.config.js --single-run",
     "test-server": "mocha --opts test/server.opts test/server/**/*.spec.js",
-    "test-common": "mocha --opts test/common.opts test/common/**/*.spec.js",
-    "test": "npm run test-client && npm run test-common && npm run test-server"
+    "test": "npm run test-client && npm run test-server"
   },
   "devDependencies": {
     "angular-mocks": "^1.5.0",
