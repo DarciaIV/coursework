@@ -93,6 +93,7 @@ prod-esx-sin4-01-01-11.vm.ironport.com -  10.4.194.2 server 10.4.194.3
 prod-esx-tok2-01-01-03.vm.ironport.com -  10.5.113.2 server 10.5.113.3
 prod-esx-tok2-01-01-11.vm.ironport.com -  10.5.113.2 server 10.5.113.3
 prod-esx-tor1-01-01-03.vm.ironport.com -  10.4.242.2 server 10.4.242.3
+prod-esx-tor1-01-01-11.vm.ironport.com -  10.4.242.2 server 10.4.242.3
 prod-esx-lon5-02-01-01.vm.ironport.com -  clock1.lon5.sco.cisco.com server clock2.lon5.sco.cisco.com
 prod-esx-lon5-02-01-21.vm.ironport.com -  clock1.lon5.sco.cisco.com server clock2.lon5.sco.cisco.com
 prod-esx-lon5-02-02-02.vm.ironport.com -  clock1.lon5.sco.cisco.com server clock2.lon5.sco.cisco.com
