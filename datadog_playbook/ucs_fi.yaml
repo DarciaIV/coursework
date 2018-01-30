@@ -1,0 +1,33 @@
+init_config:
+    min_collection_interval: 60
+
+instances:
+   - ip_address: 10.124.31.254
+     port: 443
+     username: dd-agent
+     password: 'xZ!5f7OM'
+     timeout: 1
+     retries: 5
+     tags:
+       - fi:ucs1-dxb1
+       - dc:dxb1
+
+   - ip_address: 10.124.35.254
+     port: 443
+     username: dd-agent
+     password: 'xZ!5f7OM'
+     timeout: 1
+     retries: 5
+     tags:
+       - fi:ucs1-cph1
+       - dc:cph1
+
+   - ip_address: 10.124.34.254
+     port: 443
+     username: dd-agent
+     password: 'xZ!5f7OM'
+     timeout: 1
+     retries: 5
+     tags:
+       - fi:ucs1-mum1
+       - dc:mum1

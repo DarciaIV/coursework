@@ -1,0 +1,26 @@
+# ansible-playbook dogmonit.yml --extra-vars "host=<hostname>" "api_key=<API key>"
+---
+- hosts:  "{{ host | default('web') }}"
+  user: admin #??
+  tasks:
+    - name: Installing datadog-agent
+      command: DD_API_KEY={{api_key}} bash -c "$(curl -L https://raw.githubusercontent.com/DataDog/dd-agent/master/packaging/datadog-agent/source/install_agent.sh)"
+    - name: Copying check files (ucs_fi.py)
+      copy:
+        src: ./checks/ucs_fi.py
+        dest: /etc/dd-agent/checks.d/
+    - name: Copying check files (ucs-fault.py)
+      copy:
+        src: ./checks/ucs-fault.py
+        dest: /etc/dd-agent/checks.d/
+    - name: Copying configuration files (ucs_fi.yaml)
+      copy:
+        src: ./checks/ucs_fi.yaml
+        dest: /etc/dd-agent/conf.d/
+    - name: Copying configuration files (tcp_check.yaml)
+      copy:
+        src: ./checks/tcp_check.yaml
+        dest: /etc/dd-agent/conf.d/
+
+...
+
