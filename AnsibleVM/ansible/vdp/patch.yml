@@ -1,0 +1,11 @@
+---
+- hosts: all
+  user: admin
+  become: true
+  become_method: sudo
+  become_user: admin
+  serial: 1
+  tasks:
+    - name: Applying ... 
+      command: sudo sed -i -e 's/-eq\ 0/-le\ 0/' /usr/lib/nagios/plugins/VDP_check.sh
+... 

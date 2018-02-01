@@ -1,0 +1,32 @@
+init_config:
+
+instances:
+  - name: ucs1-cph1-check
+    host: 10.124.35.254
+    port: 22
+    skip_event: true # if false, the Agent will emit both events and service checks for this port; recommended true (i.e. only submit service checks)
+    collect_response_time: true # to collect network.tcp.response_time. Default is false.
+    tags:
+      - dc:cph1
+      - fi:ucs1-cph1
+      - check:ucs1-cph1-ssh
+
+  - name: ucs1-mum1-check
+    host: 10.124.34.254
+    port: 22
+    skip_event: true # if false, the Agent will emit both events and service checks for this port; recommended true (i.e. only submit service checks)
+    collect_response_time: true # to collect network.tcp.response_time. Default is false.
+    tags:
+      - dc:mum1
+      - fi:ucs1-mum1
+      - check:ucs1-mum1-ssh
+
+  - name: ucs1-dxb1-check
+    host: 10.124.31.254
+    port: 22
+    skip_event: true # if false, the Agent will emit both events and service checks for this port; recommended true (i.e. only submit service checks)
+    collect_response_time: true # to collect network.tcp.response_time. Default is false.
+    tags:
+      - dc:dxb1
+      - fi:ucs1-dxb1
+      - check:ucs1-dxb1-ssh

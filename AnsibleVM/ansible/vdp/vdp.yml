@@ -1,0 +1,23 @@
+---
+- hosts: all
+  user: admin
+  become: true
+  become_method: sudo
+  become_user: admin
+  serial: 1
+  tasks:
+    - name: Removing old script
+      command: sudo rm -f /usr/lib/nagios/plugins/VDP_check.sh
+    - name: Copying updated script
+      copy: 
+        src: ./VDP_check.sh
+        dest: /home/admin/
+    - name: WTH
+      command: sudo mv /home/admin/VDP_check.sh /usr/lib/nagios/plugins/
+    - name: chown
+      command: sudo chown root:root /usr/lib/nagios/plugins/VDP_check.sh
+    - name: chmod
+      command: sudo chmod 700 /usr/lib/nagios/plugins/VDP_check.sh
+    - name: Run script
+      command: sudo /usr/lib/nagios/plugins/VDP_check.sh
+... 

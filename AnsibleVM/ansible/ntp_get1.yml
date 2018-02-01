@@ -1,0 +1,17 @@
+---
+- name: Info ntp
+  script: /root/ansible/ntp.sh
+- name: Copying to local
+  fetch:
+    src: /remfile
+    dest: /
+    flat: yes
+- name: Adding to list
+  local_action:
+    module: command
+    _raw_params: ./scr.sh
+- name: Removing tmp files
+  file:
+    path: /remfile
+    state: absent
+...

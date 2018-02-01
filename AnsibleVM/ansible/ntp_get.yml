@@ -1,0 +1,8 @@
+---
+- hosts: prod-esx-tor1-01-01-11.vm.ironport.com
+  user: root
+  serial: 1
+  tasks:
+    - name: Obtaining information
+      include: ntp_get1.yml
+... 
