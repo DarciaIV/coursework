@@ -1,0 +1,44 @@
+# Get current AD site
+$DC = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name.ToUpper()
+ 
+# Connect to vCenter
+Connect-VIServer prod-vsv-$dc-1.vm.ironport.com
+ 
+# Set image
+$image = "ESXi-6.5-with-201712101-SG"
+  
+# Add it to software depot
+Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
+  
+# Remove old AutoDeploy Rules
+Get-DeployRule "CTR-ESX-$dc-01-01" | Remove-DeployRule -Delete
+  
+  
+# Add new AutoDeploy rules
+$cluster = "CTR-ESX-$DC-01-01"
+New-DeployRule $cluster -Item $image,$cluster,Ctr001 -Pattern "oemstring=`$`SPT:$cluster"
+Add-DeployRule -DeployRule $cluster
+ 
+# Force AutoDeploy to use new image
+Get-Cluster CTR-ESX-$DC-01-01 | Get-VMHost | Apply-ESXImageProfile $image
+ 
+# Disable anti-affinity rules if they are enabled to allow VM migration during host entrance into maintenance mode
+Get-Cluster CTR-ESX-$DC-01-01 | Get-DrsRule | where enabled -eq $true | Set-DrsRule -Enabled:$false -RunAsync
+ 
+# Enable host cluster DRS if it's not enabled to allow VM migration during host entrance into maintenance mode
+Get-Cluster CTR-ESX-$DC-01-01 | where DRSAutomationLevel -eq PartiallyAutomated | Set-Cluster -DRSEnabled:$true -DRSAutomationLevel FullyAutomated -Confirm:$false
+   
+ 
+# Get names of ctr cluster hosts
+$ctrhosts = (Get-Cluster CTR-ESX-$DC-01-01 | Get-VMHost).Name 
+ 
+foreach ($ctrhost in $ctrhosts)
+{
+    # Set host in maintenance mode and wait while VMs are migrated off the host
+    Get-VMHost "$ctrhost" | Set-VMHost -State Maintenance -Evacuate:$true 
+ 
+    #Reboot Host
+    Get-VMHost "$ctrhost" | Restart-VMHost -Evacuate:$true 
+    }
+# Enable Anti affinity rules back
+Get-Cluster CTR-ESX-$DC-01-01 | Get-DrsRule | Set-DrsRule -Enabled:$true -RunAsync
