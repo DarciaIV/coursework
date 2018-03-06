@@ -1,1 +1,33 @@
-hui suka
+# Get current AD site
+$DC = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name
+  
+# Connect to vCenter
+Connect-VIServer prod-vsv-$dc-1.vm.ironport.com
+  
+# Set image
+$image = "ESXi-6.5-with-201712101-SG"
+   
+# Add it to software depot
+Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
+   
+# Remove old AutoDeploy Rules
+Get-DeployRule | Remove-DeployRule -Delete
+   
+# Get PROD clusters count
+$count = (Get-Cluster | where { $_.Name -like "PROD-ESX-$DC*" -and $_.Name -notlike "*-C1" }).Count
+   
+# Add new AutoDeploy rules
+$cluster = "CTR-ESX-$DC-01-01"
+New-DeployRule $cluster -Item $image,$cluster,Ctr001 -Pattern "oemstring=`$`SPT:$cluster"
+Add-DeployRule -DeployRule $cluster
+for ($i =1;$i -le $count; $i++) {
+   $cluster = "PROD-ESX-$DC-01-0$i"
+   New-DeployRule $cluster -Item $image,$cluster,Tenant00$i -Pattern "oemstring=`$`SPT:$cluster"
+   Add-DeployRule -DeployRule $cluster
+}
+$cluster = "PROD-ESX-$DC-01-C1"
+New-DeployRule $cluster -Item $image,$cluster,Common001 -Pattern "oemstring=`$`SPT:$cluster"
+Add-DeployRule -DeployRule $cluster
+   
+# Force AutoDeploy to use new image
+Get-VMHost | Apply-ESXImageProfile $image
