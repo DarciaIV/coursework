@@ -1,29 +1,126 @@
-# Get current AD site
-$DC = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name.ToUpper()
-  
-# Connect to vCenter
-Connect-VIServer prod-vsv-$dc-1.vm.ironport.com
-
-#Add Licenses
-$VcLicMgr=$DefaultVIServer
-$LicMgr = Get-View $VcLicMgr
-$AddLic= Get-View $LicMgr.Content.LicenseManager
-
-# Add vCenter License
-$AddLic.AddLicense("MU6D2-APL03-48061-T23X2-CKUN4",$null) # vSphere 5 license
-$AddLic.AddLicense("J0401-8CL15-28U93-0L2AM-34NK4",$null) # vSphere 6 license
-
-# Add host licenses
-Get-VMHost | ? Version -eq 5.5.0 | Set-VMHost -LicenseKey "MU6D2-APL03-48061-T23X2-CKUN4" -RunAsync Connected
-Get-VMHost | sort Name | ? LicenseKey -eq "00000-00000-00000-00000-00000" | Set-VMHost -LicenseKey "QM483-283DK-68V9M-0VR0K-9NX20"
-if ((Get-VMHost | ? LicenseKey -eq "00000-00000-00000-00000-00000" ).Count -gt 0) {
-    Get-VMHost | sort Name | ? LicenseKey -eq "00000-00000-00000-00000-00000" | Set-VMHost -LicenseKey "QJ411-28L9K-28K9N-09THK-94G04"
+# Import Cisco UCS PowerShell module
+Import-Module "C:\Program Files (x86)\WindowsPowerShell\Modules\Cisco.UCS.Core\Cisco.UCS.Core.psd1"
+Import-Module "C:\Program Files (x86)\WindowsPowerShell\Modules\Cisco.UCSManager\Cisco.UCSManager.psd1"
+   
+# Get Cisco UCS creds and replace domain to the value required by ucs
+$creds = Get-Credential -Message "Provide your VM.ironport.com credentials"
+$ucscreds = New-Object System.Management.Automation.PSCredential ($creds.UserName.ToLower().Replace("vm\","ucs-vm.ironport.com\"), $creds.Password)
+   
+# Define a counter and datacenters list
+$i=1
+$DCs = "AKL1-1",
+       "AKL1-2",
+       "CHC1-1",
+       "CHC1-2",
+       "CHI2",
+       "COP2",
+       "DAL1",
+       "FRA2",
+       "HKG3",
+       "LON4",
+       "LON4-9",
+       "LON5",
+       "LON5-2",
+       "LON5-3",
+       "LON5-4",
+       "LON5-5",
+       "LON5-8",
+       "LON5-9",
+       "LON5-A",
+       "LRK1-1",
+       "LRK1-2",
+       "MIA2",
+       "MUM1",
+       "PAR2",
+       "SAO2",
+       "SCS2",
+       "SIN4",
+       "SJL1",
+       "SYD3",
+       "TOR1",
+       "TOK2",
+       "WDC1-1",
+       "WDC1-2"
+   
+Write-Host "Available Datacenters:"
+   
+foreach ($dc in $DCs) {
+    Write-Host "$i) $dc"
+    $i++
 }
-if ((Get-VMHost | ? LicenseKey -eq "00000-00000-00000-00000-00000" ).Count -gt 0) {
-    Get-VMHost | sort Name | ? LicenseKey -eq "00000-00000-00000-00000-00000" | Set-VMHost -LicenseKey "LJ49J-28150-P8U9X-0AT2P-90G04"
+   
+$dc = Read-Host "Select Datacenter"
+   
+try {  
+    $dc = $DCs[$dc-1]
 }
-
-# Suppress SSH Shell warning
-Get-VMHost | Set-VmHostAdvancedConfiguration -Name UserVars.SuppressShellWarning -Value 1
-
-Disconnect-VIServer -Confirm:$false
+catch {
+    Write-Host "Incorrect Datacenter"
+    break
+}
+   
+# find POD number
+if ($dc.Length -eq 4) {
+    $pod = 1
+}
+else {      
+    $pod = $dc.Split("-")[1]
+    $dc = $dc.Split("-")[0]
+}
+# Disconnect UCS if there any previously connected
+Disconnect-UCS -InformationAction SilentlyContinue -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+   
+# Connect to UCS  
+$ucs = Connect-Ucs "prod-ucs-fi-$dc-$pod.$dc.sco.cisco.com" -Credential $ucscreds
+if (!$ucs) {
+    $ucs = Connect-Ucs "prod-ucs-fi-$dc-$pod.$dc.sco.cisco.com" -Credential (Get-Credential -Message "Please provide UCS admin credentials")
+    if (!$ucs) {
+        Write-Host "Failed to connect to UCS"
+        break
+    }
+}
+# Change firmware package policy to global-default
+Get-UcsServiceProfile -type updating-template | Set-UcsServiceProfile -HostFwPolicyName global-default -Force
+# Get service profiles pending reboot or reassociation
+$serviceprofiles = (Get-UcsServiceProfile | ? OperState -like "pending*" | where name -notlike "*-c1-*"| sort { $_.Name.Substring($_.Name.Length-2,2) },{ $_.Name.Substring($_.Name.Length-5,2) }).Name
+   
+# Check if we are on terminal server
+if ($env:computername -like "*trm*") {
+    # Try to connect to vCenter under current logged in user, otherwise exit
+    if (!(Connect-VIServer prod-vsv-$dc-1)) {
+       Write-Host "Unable to connect to vCenter, stopping the script..."
+       break
+    }
+}
+# Try to connect to vCenter with provided domain creds, otherwise exit
+else {
+    if (!(Connect-VIServer prod-vsv-$dc-1 -Credential $creds)) {
+       Write-Host "Unable to connect to vCenter, stopping the script..."
+       break
+    }
+}
+   
+# Get all VM hosts names
+$vmhosts = (Get-VMHost).Name
+   
+# Start loop
+foreach ($serviceprofile in $serviceprofiles)
+{
+    # Get hosts
+    if ($vmhosts | where { $_ -eq "$serviceprofile.vm.ironport.com" })
+    {
+        # Disable anti-affinity rules for host cluster if they are enabled to allow VM migration during host entrance into maintenance mode
+        Get-VMHost "$serviceprofile.vm.ironport.com" | Get-Cluster | Get-DrsRule | where enabled -eq $true | Set-DrsRule -Enabled:$false -RunAsync
+   
+        # Enable host cluster DRS if it's not enabled to allow VM migration during host entrance into maintenance mode
+        Get-VMHost "$serviceprofile.vm.ironport.com" | Get-Cluster | where DRSAutomationLevel -eq PartiallyAutomated | Set-Cluster -DRSEnabled:$true -DRSAutomationLevel FullyAutomated -Confirm:$false
+   
+        # Set host in maintenance mode and wait while VMs are migrated off the host
+        Get-VMHost "$serviceprofile.vm.ironport.com" | Set-VMHost -State Maintenance -Evacuate:$true       
+    }  
+    # Acknowledge pending restart in UCSM when VMs are migrated off the host and it is in maintenance mode
+    Get-UcsServiceProfile -Name $serviceprofile | Set-UcsLsmaintAck -AdminState trigger-immediate -Confirm:$false -Force
+}
+   
+# Enable anti-affinity rules
+Get-Cluster | Get-DrsRule | where enabled -eq $false | Set-DrsRule -Enabled:$true -RunAsync
