@@ -1,97 +1,29 @@
 # Get current AD site
 $DC = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name.ToUpper()
- 
+  
 # Connect to vCenter
 Connect-VIServer prod-vsv-$dc-1.vm.ironport.com
- 
-# Decrease memory reservations
-Get-VM | where name -Like cws-prd-prox-* | Get-VMResourceConfiguration | ? MemReservationGB -ne 24 | Set-VMResourceConfiguration -MemReservationGB 24
 
-# Check number of PODs in curent DC
-$PODs = (Get-DnsServerResourceRecord -ZoneName vm.ironport.com -ComputerName prod-ad-$dc-1 | where HostName -like *-ucs-fi-$dc-?).HostName
-if ($PODs.Count -gt 1) {
-    $i=1
-    Write-Host "Available PODs:"
-    foreach ($pod in $PODs) {
-        Write-Host "$i) $pod"
-        $i++
-    }
-    
-    $pod = Read-Host "Select POD"
-    
-    try { 
-        $pod = $PODs[$pod-1]
-    }
-    catch {
-        Write-Host "Incorrect Datacenter"
-        break
-    }  
-    $type = $pod.Split("-")[0]
-    $pod = $pod.Split("-")[4]  
-}
-else {
-    $type = $PODs.Split("-")[0]
-    $pod = $PODs.Split("-")[4]
-}
-# Disconnect UCS if there any previously connected
-Disconnect-UCS -InformationAction SilentlyContinue -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+#Add Licenses
+$VcLicMgr=$DefaultVIServer
+$LicMgr = Get-View $VcLicMgr
+$AddLic= Get-View $LicMgr.Content.LicenseManager
 
-# Try to connect to vCenter under current logged in user, otherwise exit
-if (!(Connect-VIServer $type-vsv-$dc-1)) {
-    Write-Host "Unable to connect to vCenter, stopping the script..."
-    break
+# Add vCenter License
+$AddLic.AddLicense("MU6D2-APL03-48061-T23X2-CKUN4",$null) # vSphere 5 license
+$AddLic.AddLicense("J0401-8CL15-28U93-0L2AM-34NK4",$null) # vSphere 6 license
+
+# Add host licenses
+Get-VMHost | ? Version -eq 5.5.0 | Set-VMHost -LicenseKey "MU6D2-APL03-48061-T23X2-CKUN4" -RunAsync Connected
+Get-VMHost | sort Name | ? LicenseKey -eq "00000-00000-00000-00000-00000" | Set-VMHost -LicenseKey "QM483-283DK-68V9M-0VR0K-9NX20"
+if ((Get-VMHost | ? LicenseKey -eq "00000-00000-00000-00000-00000" ).Count -gt 0) {
+    Get-VMHost | sort Name | ? LicenseKey -eq "00000-00000-00000-00000-00000" | Set-VMHost -LicenseKey "QJ411-28L9K-28K9N-09THK-94G04"
+}
+if ((Get-VMHost | ? LicenseKey -eq "00000-00000-00000-00000-00000" ).Count -gt 0) {
+    Get-VMHost | sort Name | ? LicenseKey -eq "00000-00000-00000-00000-00000" | Set-VMHost -LicenseKey "LJ49J-28150-P8U9X-0AT2P-90G04"
 }
 
-# Set image
-$image = "ESXi-6.5-with-201712101-SG"
-   
-# Add it to software depot
-Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
+# Suppress SSH Shell warning
+Get-VMHost | Set-VmHostAdvancedConfiguration -Name UserVars.SuppressShellWarning -Value 1
 
-# Set image
-$image = "ESXi-6.5-with-201712101-SG"
-   
-# Add it to software depot
-Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
-   
-# Remove old AutoDeploy Rules
-Get-DeployRule | Remove-DeployRule -Delete
-   
-# Get PROD clusters count
-$count = (Get-Cluster | where { $_.Name -like "PROD-ESX-$DC*" -and $_.Name -notlike "*-C1" }).Count
-   
-# Add new AutoDeploy rules
-$cluster = "CTR-ESX-$DC-01-01"
-New-DeployRule $cluster -Item $image,$cluster,Ctr001 -Pattern "oemstring=`$`SPT:$cluster"
-Add-DeployRule -DeployRule $cluster
-for ($i =1;$i -le $count; $i++) {
-   $cluster = "PROD-ESX-$DC-01-0$i"
-   New-DeployRule $cluster -Item $image,$cluster,Tenant00$i -Pattern "oemstring=`$`SPT:$cluster"
-   Add-DeployRule -DeployRule $cluster
-}
-$cluster = "PROD-ESX-$DC-01-C1"
-New-DeployRule $cluster -Item $image,$cluster,Common001 -Pattern "oemstring=`$`SPT:$cluster"
-Add-DeployRule -DeployRule $cluster
-   
-# Force AutoDeploy to use new image
-Get-VMHost | Apply-ESXImageProfile $image
-
-# Disable anti-affinity rules if they are enabled to allow VM migration during host entrance into maintenance mode
-Get-Cluster | Get-DrsRule | where enabled -eq $true | Set-DrsRule -Enabled:$false
-
-# Enable host cluster DRS if it's not enabled to allow VM migration during host entrance into maintenance mode
-Get-Cluster | where DRSAutomationLevel -eq PartiallyAutomated | Set-Cluster -DRSEnabled:$true -DRSAutomationLevel FullyAutomated -Confirm:$false
-
-# Reboot first host from each cluster
-Get-VMHost | ? Build -eq 5969303 | ? Name -Like prod-* | ? Name -notlike *util* | ? name -notlike *-c1-* | sort { $_.Name.Substring($_.Name.Length-18,2) },{ $_.Name.Substring($_.Name.Length-21,2) } | % {   
-    # Set host into maintenance mode and wait for VMs to be migrated off the host
-    do {
-        Start-Sleep -s 60
-    }
-    while (($_ | Get-Cluster | Get-VMHost | ? { $_.State -eq "Maintenance" -or $_.State -eq "Disconnected" -or $_.State -eq  "NotResponding" }).Count -ge 3)
-    $_ | Set-VMHost -State Maintenance -Evacuate:$true
-    $_ | Restart-VMHost -Confirm:$false
-}
-
-# Enable anti-affinity rules
-Get-Cluster | Get-DrsRule | where enabled -eq $false | Set-DrsRule -Enabled:$true -RunAsync
+Disconnect-VIServer -Confirm:$false
