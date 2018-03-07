@@ -1,126 +1,97 @@
-# Import Cisco UCS PowerShell module
-Import-Module "C:\Program Files (x86)\WindowsPowerShell\Modules\Cisco.UCS.Core\Cisco.UCS.Core.psd1"
-Import-Module "C:\Program Files (x86)\WindowsPowerShell\Modules\Cisco.UCSManager\Cisco.UCSManager.psd1"
-   
-# Get Cisco UCS creds and replace domain to the value required by ucs
-$creds = Get-Credential -Message "Provide your VM.ironport.com credentials"
-$ucscreds = New-Object System.Management.Automation.PSCredential ($creds.UserName.ToLower().Replace("vm\","ucs-vm.ironport.com\"), $creds.Password)
-   
-# Define a counter and datacenters list
-$i=1
-$DCs = "AKL1-1",
-       "AKL1-2",
-       "CHC1-1",
-       "CHC1-2",
-       "CHI2",
-       "COP2",
-       "DAL1",
-       "FRA2",
-       "HKG3",
-       "LON4",
-       "LON4-9",
-       "LON5",
-       "LON5-2",
-       "LON5-3",
-       "LON5-4",
-       "LON5-5",
-       "LON5-8",
-       "LON5-9",
-       "LON5-A",
-       "LRK1-1",
-       "LRK1-2",
-       "MIA2",
-       "MUM1",
-       "PAR2",
-       "SAO2",
-       "SCS2",
-       "SIN4",
-       "SJL1",
-       "SYD3",
-       "TOR1",
-       "TOK2",
-       "WDC1-1",
-       "WDC1-2"
-   
-Write-Host "Available Datacenters:"
-   
-foreach ($dc in $DCs) {
-    Write-Host "$i) $dc"
-    $i++
+# Get current AD site
+$DC = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name.ToUpper()
+ 
+# Connect to vCenter
+Connect-VIServer prod-vsv-$dc-1.vm.ironport.com
+ 
+# Decrease memory reservations
+Get-VM | where name -Like cws-prd-prox-* | Get-VMResourceConfiguration | ? MemReservationGB -ne 24 | Set-VMResourceConfiguration -MemReservationGB 24
+
+# Check number of PODs in curent DC
+$PODs = (Get-DnsServerResourceRecord -ZoneName vm.ironport.com -ComputerName prod-ad-$dc-1 | where HostName -like *-ucs-fi-$dc-?).HostName
+if ($PODs.Count -gt 1) {
+    $i=1
+    Write-Host "Available PODs:"
+    foreach ($pod in $PODs) {
+        Write-Host "$i) $pod"
+        $i++
+    }
+    
+    $pod = Read-Host "Select POD"
+    
+    try { 
+        $pod = $PODs[$pod-1]
+    }
+    catch {
+        Write-Host "Incorrect Datacenter"
+        break
+    }  
+    $type = $pod.Split("-")[0]
+    $pod = $pod.Split("-")[4]  
 }
-   
-$dc = Read-Host "Select Datacenter"
-   
-try {  
-    $dc = $DCs[$dc-1]
-}
-catch {
-    Write-Host "Incorrect Datacenter"
-    break
-}
-   
-# find POD number
-if ($dc.Length -eq 4) {
-    $pod = 1
-}
-else {      
-    $pod = $dc.Split("-")[1]
-    $dc = $dc.Split("-")[0]
+else {
+    $type = $PODs.Split("-")[0]
+    $pod = $PODs.Split("-")[4]
 }
 # Disconnect UCS if there any previously connected
 Disconnect-UCS -InformationAction SilentlyContinue -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+
+# Try to connect to vCenter under current logged in user, otherwise exit
+if (!(Connect-VIServer $type-vsv-$dc-1)) {
+    Write-Host "Unable to connect to vCenter, stopping the script..."
+    break
+}
+
+# Set image
+$image = "ESXi-6.5-with-201712101-SG"
    
-# Connect to UCS  
-$ucs = Connect-Ucs "prod-ucs-fi-$dc-$pod.$dc.sco.cisco.com" -Credential $ucscreds
-if (!$ucs) {
-    $ucs = Connect-Ucs "prod-ucs-fi-$dc-$pod.$dc.sco.cisco.com" -Credential (Get-Credential -Message "Please provide UCS admin credentials")
-    if (!$ucs) {
-        Write-Host "Failed to connect to UCS"
-        break
+# Add it to software depot
+Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
+
+# Set image
+$image = "ESXi-6.5-with-201712101-SG"
+   
+# Add it to software depot
+Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
+   
+# Remove old AutoDeploy Rules
+Get-DeployRule | Remove-DeployRule -Delete
+   
+# Get PROD clusters count
+$count = (Get-Cluster | where { $_.Name -like "PROD-ESX-$DC*" -and $_.Name -notlike "*-C1" }).Count
+   
+# Add new AutoDeploy rules
+$cluster = "CTR-ESX-$DC-01-01"
+New-DeployRule $cluster -Item $image,$cluster,Ctr001 -Pattern "oemstring=`$`SPT:$cluster"
+Add-DeployRule -DeployRule $cluster
+for ($i =1;$i -le $count; $i++) {
+   $cluster = "PROD-ESX-$DC-01-0$i"
+   New-DeployRule $cluster -Item $image,$cluster,Tenant00$i -Pattern "oemstring=`$`SPT:$cluster"
+   Add-DeployRule -DeployRule $cluster
+}
+$cluster = "PROD-ESX-$DC-01-C1"
+New-DeployRule $cluster -Item $image,$cluster,Common001 -Pattern "oemstring=`$`SPT:$cluster"
+Add-DeployRule -DeployRule $cluster
+   
+# Force AutoDeploy to use new image
+Get-VMHost | Apply-ESXImageProfile $image
+
+# Disable anti-affinity rules if they are enabled to allow VM migration during host entrance into maintenance mode
+Get-Cluster | Get-DrsRule | where enabled -eq $true | Set-DrsRule -Enabled:$false
+
+# Enable host cluster DRS if it's not enabled to allow VM migration during host entrance into maintenance mode
+Get-Cluster | where DRSAutomationLevel -eq PartiallyAutomated | Set-Cluster -DRSEnabled:$true -DRSAutomationLevel FullyAutomated -Confirm:$false
+
+# Reboot first host from each cluster
+Get-VMHost | ? Build -eq 5969303 | ? Name -Like prod-* | ? Name -notlike *util* | ? name -notlike *-c1-* | sort { $_.Name.Substring($_.Name.Length-18,2) },{ $_.Name.Substring($_.Name.Length-21,2) } | % {   
+    # Set host into maintenance mode and wait for VMs to be migrated off the host
+    do {
+        Start-Sleep -s 60
     }
+    while (($_ | Get-Cluster | Get-VMHost | ? { $_.State -eq "Maintenance" -or $_.State -eq "Disconnected" -or $_.State -eq  "NotResponding" }).Count -ge 3)
+    $_ | Set-VMHost -State Maintenance -Evacuate:$true
+    $_ | Restart-VMHost -Confirm:$false
 }
-# Change firmware package policy to global-default
-Get-UcsServiceProfile -type updating-template | Set-UcsServiceProfile -HostFwPolicyName global-default -Force
-# Get service profiles pending reboot or reassociation
-$serviceprofiles = (Get-UcsServiceProfile | ? OperState -like "pending*" | where name -notlike "*-c1-*"| sort { $_.Name.Substring($_.Name.Length-2,2) },{ $_.Name.Substring($_.Name.Length-5,2) }).Name
-   
-# Check if we are on terminal server
-if ($env:computername -like "*trm*") {
-    # Try to connect to vCenter under current logged in user, otherwise exit
-    if (!(Connect-VIServer prod-vsv-$dc-1)) {
-       Write-Host "Unable to connect to vCenter, stopping the script..."
-       break
-    }
-}
-# Try to connect to vCenter with provided domain creds, otherwise exit
-else {
-    if (!(Connect-VIServer prod-vsv-$dc-1 -Credential $creds)) {
-       Write-Host "Unable to connect to vCenter, stopping the script..."
-       break
-    }
-}
-   
-# Get all VM hosts names
-$vmhosts = (Get-VMHost).Name
-   
-# Start loop
-foreach ($serviceprofile in $serviceprofiles)
-{
-    # Get hosts
-    if ($vmhosts | where { $_ -eq "$serviceprofile.vm.ironport.com" })
-    {
-        # Disable anti-affinity rules for host cluster if they are enabled to allow VM migration during host entrance into maintenance mode
-        Get-VMHost "$serviceprofile.vm.ironport.com" | Get-Cluster | Get-DrsRule | where enabled -eq $true | Set-DrsRule -Enabled:$false -RunAsync
-   
-        # Enable host cluster DRS if it's not enabled to allow VM migration during host entrance into maintenance mode
-        Get-VMHost "$serviceprofile.vm.ironport.com" | Get-Cluster | where DRSAutomationLevel -eq PartiallyAutomated | Set-Cluster -DRSEnabled:$true -DRSAutomationLevel FullyAutomated -Confirm:$false
-   
-        # Set host in maintenance mode and wait while VMs are migrated off the host
-        Get-VMHost "$serviceprofile.vm.ironport.com" | Set-VMHost -State Maintenance -Evacuate:$true       
-    }  
-    # Acknowledge pending restart in UCSM when VMs are migrated off the host and it is in maintenance mode
-    Get-UcsServiceProfile -Name $serviceprofile | Set-UcsLsmaintAck -AdminState trigger-immediate -Confirm:$false -Force
-}
-   
+
 # Enable anti-affinity rules
 Get-Cluster | Get-DrsRule | where enabled -eq $false | Set-DrsRule -Enabled:$true -RunAsync
