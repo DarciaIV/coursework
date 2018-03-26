@@ -1,62 +1,34 @@
-# Import Cisco UCS PowerShell module
-Import-Module "C:\Program Files (x86)\WindowsPowerShell\Modules\Cisco.UCS.Core\Cisco.UCS.Core.psd1"
-Import-Module "C:\Program Files (x86)\WindowsPowerShell\Modules\Cisco.UCSManager\Cisco.UCSManager.psd1"
+
 # Get current AD site
-$dc = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name
-# Get Cisco UCS creds and replace domain to the value required by ucs
-$pass = Read-Host "Please provide your VM account password" -AsSecureString
-$creds = New-Object System.Management.Automation.PSCredential ("ucs-vm.ironport.com\$env:USERNAME", $pass)
-# Check number of PODs in curent DC
-$PODs = (Get-DnsServerResourceRecord -ZoneName vm.ironport.com -ComputerName prod-ad-$dc-1 | where HostName -like *-ucs-fi-$dc-?).HostName
-if ($PODs.Count -gt 1) {
-    $i=1
-    Write-Host "Available PODs:"
-    foreach ($pod in $PODs) {
-        Write-Host "$i) $pod"
-        $i++
-    }
-    
-    $pod = Read-Host "Select POD"
-    
-    try { 
-        $pod = $PODs[$pod-1]
-    }
-    catch {
-        Write-Host "Incorrect Datacenter"
-        break
-    }  
-    $type = $pod.Split("-")[0]
-    $pod = $pod.Split("-")[4]  
+$DC = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name
+  
+# Connect to vCenter
+Connect-VIServer prod-vsv-$dc-1.vm.ironport.com
+  
+# Set image
+$image = "ESXi-6.5-with-201712101-SG"
+   
+# Add it to software depot
+Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
+   
+# Remove old AutoDeploy Rules
+Get-DeployRule | Remove-DeployRule -Delete
+   
+# Get PROD clusters count
+$count = (Get-Cluster | where { $_.Name -like "PROD-ESX-$DC*" -and $_.Name -notlike "*-C1" }).Count
+   
+# Add new AutoDeploy rules
+$cluster = "CTR-ESX-$DC-01-01"
+New-DeployRule $cluster -Item $image,$cluster,Ctr001 -Pattern "oemstring=`$`SPT:$cluster"
+Add-DeployRule -DeployRule $cluster
+for ($i =1;$i -le $count; $i++) {
+   $cluster = "PROD-ESX-$DC-01-0$i"
+   New-DeployRule $cluster -Item $image,$cluster,Tenant00$i -Pattern "oemstring=`$`SPT:$cluster"
+   Add-DeployRule -DeployRule $cluster
 }
-else {
-    $type = $PODs.Split("-")[0]
-    $pod = $PODs.Split("-")[4]
-}
-# Disconnect UCS if there any previously connected
-Disconnect-UCS -InformationAction SilentlyContinue -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
-# Connect to UCS 
-$ucs = Connect-Ucs "$type-ucs-fi-$dc-$pod.$dc.sco.cisco.com" -Credential $creds
-if (!$ucs) {
-    $ucs = Connect-Ucs "$type-ucs-fi-$dc-$pod.$dc.sco.cisco.com" -Credential (Get-Credential -Message "Please provide UCS admin credentials")
-    if (!$ucs) {
-        Write-Host "Failed to connect to UCS, stopping the script..."
-        break
-    }
-}
-# Change firmware package policy to global-default
-Get-UcsServiceProfile -type updating-template | Set-UcsServiceProfile -HostFwPolicyName global-default -Force
-# Try to connect to vCenter under current logged in user, otherwise exit
-if (!(Connect-VIServer $type-vsv-$dc-1)) {
-    Write-Host "Unable to connect to vCenter, stopping the script..."
-    break
-}
-# Disable anti-affinity rules if they are enabled to allow VM migration during host entrance into maintenance mode
-Get-Cluster | Get-DrsRule | where enabled -eq $true | Set-DrsRule -Enabled:$false
-# Enable host cluster DRS if it's not enabled to allow VM migration during host entrance into maintenance mode
-Get-Cluster | where DRSAutomationLevel -eq PartiallyAutomated | Set-Cluster -DRSEnabled:$true -DRSAutomationLevel FullyAutomated -Confirm:$false
-# Reboot first host from each cluster
-Get-VMHost | ? Name -Like *-01.vm.ironport.com | sort Name | % {   
-    # Set host into maintenance mode and wait for VMs to be migrated off the host
-    $_ | Set-VMHost -State Maintenance -Evacuate:$true
-    $_ | Restart-VMHost -Confirm:$false
-}
+$cluster = "PROD-ESX-$DC-01-C1"
+New-DeployRule $cluster -Item $image,$cluster,Common001 -Pattern "oemstring=`$`SPT:$cluster"
+Add-DeployRule -DeployRule $cluster
+   
+# Force AutoDeploy to use new image
+Get-VMHost | Apply-ESXImageProfile $image
