@@ -1,8 +1,8 @@
 $creds=Get-Credential
-$dcs="AKL1","CHC1","CHI2","COP2","DAL1","FRA2","HKG3","JOH2","LON4","LON5","LRK1","MIA2","MPOD","MUM1","PAR2","SAO2","SCS2","SIN4","SJL1","SYD3","TOK2","TOR1","WDC1" 
+$dcs="chi2","dal1","fra2","hkg3","mia2","mum1","par2","sin4","sjl1","syd3","tok2","tor1","wdc1" 
 
 foreach ($dc in $dcs){
     Disconnect-VIServer -Confirm:$false
     Connect-VIServer prod-vsv-$dc-1.vm.ironport.com -Credential $creds -WarningAction SilentlyContinue
-
-	}
+    New-Snapshot -VM prod-vsv-$dc-1.vm.ironport.com -Name BeforePatch
+    }
