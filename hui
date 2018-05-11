@@ -1,97 +1,61 @@
-# Get current AD site
-$DC = [System.DirectoryServices.ActiveDirectory.ActiveDirectorySite]::GetComputerSite().Name.ToUpper()
- 
-# Connect to vCenter
-Connect-VIServer prod-vsv-$dc-1.vm.ironport.com
- 
-# Decrease memory reservations
-Get-VM | where name -Like cws-prd-prox-* | Get-VMResourceConfiguration | ? MemReservationGB -ne 24 | Set-VMResourceConfiguration -MemReservationGB 24
+---
+- hosts: all
+  connection: local
+  gather_facts: no
+  tasks:
+    - name: Set site name
+      ucs_managed_objects:
+        ucs_ip: "{{ ucs_hostname }}"
+        ucs_username: "{{ ucs_username }}"
+        ucs_password: "{{ ucs_password }}"
+        objects:
+        - module: ucsmsdk.mometa.top.TopSystem
+          class: TopSystem
+          properties:
+            parent_mo_or_dn: sys
+            name: "{{ name }}"
+            descr: "{{ description }}"
+            owner: Here will be owner
+            site: "{{ site }}"
 
-# Check number of PODs in curent DC
-$PODs = (Get-DnsServerResourceRecord -ZoneName vm.ironport.com -ComputerName prod-ad-$dc-1 | where HostName -like *-ucs-fi-$dc-?).HostName
-if ($PODs.Count -gt 1) {
-    $i=1
-    Write-Host "Available PODs:"
-    foreach ($pod in $PODs) {
-        Write-Host "$i) $pod"
-        $i++
-    }
-    
-    $pod = Read-Host "Select POD"
-    
-    try { 
-        $pod = $PODs[$pod-1]
-    }
-    catch {
-        Write-Host "Incorrect Datacenter"
-        break
-    }  
-    $type = $pod.Split("-")[0]
-    $pod = $pod.Split("-")[4]  
-}
-else {
-    $type = $PODs.Split("-")[0]
-    $pod = $PODs.Split("-")[4]
-}
-# Disconnect UCS if there any previously connected
-Disconnect-UCS -InformationAction SilentlyContinue -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+    - name: Add NTP Server
+      cisco_ucs_ntp:
+        ucs_ip: "{{ ucs_hostname }}"
+        ucs_username: "{{ ucs_username }}"
+        ucs_password: "{{ ucs_password }}"
+        name: "{{ item }}"
+      loop: "{{ ntps }}"
 
-# Try to connect to vCenter under current logged in user, otherwise exit
-if (!(Connect-VIServer $type-vsv-$dc-1)) {
-    Write-Host "Unable to connect to vCenter, stopping the script..."
-    break
-}
+    - name: Add DNS Server
+      cisco_ucs_dns:
+        ucs_ip: "{{ ucs_hostname }}"
+        ucs_username: "{{ ucs_username }}"
+        ucs_password: "{{ ucs_password }}"
+        name: "{{ item }}"
+      loop: "{{ dnss }}"
 
-# Set image
-$image = "ESXi-6.5-with-201712101-SG"
-   
-# Add it to software depot
-Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
+    - name: Add IP Pool
+      ucs_ip_pool:
+        ucs_ip: "{{ ucs_hostname }}"
+        ucs_username: "{{ ucs_username }}"
+        ucs_password: "{{ ucs_password }}"
+        name: "{{ item.name }}"
+        order: default
+        first_addr: "{{ item.from }}"
+        last_addr: "{{ item.to }}"
+        subnet_mask: "{{ item.subnet }}"
+        default_gw: "{{ item.gateway }}"
+        primary_dns: "{{ item.primary_dns }}"
+        secondary_dns: "{{ item.secondary_dns }}"
+      loop: "{{ ip_pools }}"
 
-# Set image
-$image = "ESXi-6.5-with-201712101-SG"
-   
-# Add it to software depot
-Add-EsxSoftwareDepot D:\Working\AutoDeployRepo\$image.zip
-   
-# Remove old AutoDeploy Rules
-Get-DeployRule | Remove-DeployRule -Delete
-   
-# Get PROD clusters count
-$count = (Get-Cluster | where { $_.Name -like "PROD-ESX-$DC-01-01*" -and $_.Name -notlike "*-C1" }).Count
-   
-# Add new AutoDeploy rules
-$cluster = "CTR-ESX-$DC-01-01"
-New-DeployRule $cluster -Item $image,$cluster,Ctr001 -Pattern "oemstring=`$`SPT:$cluster"
-Add-DeployRule -DeployRule $cluster
-for ($i =1;$i -le $count; $i++) {
-   $cluster = "PROD-ESX-$DC-01-0$i"
-   New-DeployRule $cluster -Item $image,$cluster,Tenant00$i -Pattern "oemstring=`$`SPT:$cluster"
-   Add-DeployRule -DeployRule $cluster
-}
-$cluster = "PROD-ESX-$DC-01-C1"
-New-DeployRule $cluster -Item $image,$cluster,Common001 -Pattern "oemstring=`$`SPT:$cluster"
-Add-DeployRule -DeployRule $cluster
-   
-# Force AutoDeploy to use new image
-Get-VMHost | Apply-ESXImageProfile $image
-
-# Disable anti-affinity rules if they are enabled to allow VM migration during host entrance into maintenance mode
-Get-Cluster | Get-DrsRule | where enabled -eq $true | Set-DrsRule -Enabled:$false
-
-# Enable host cluster DRS if it's not enabled to allow VM migration during host entrance into maintenance mode
-Get-Cluster | where DRSAutomationLevel -eq PartiallyAutomated | Set-Cluster -DRSEnabled:$true -DRSAutomationLevel FullyAutomated -Confirm:$false
-
-# Reboot first host from each cluster
-Get-VMHost | ? Build -eq 5969303 | ? Name -Like prod-* | ? Name -notlike *util* | ? name -notlike *-c1-* | sort { $_.Name.Substring($_.Name.Length-18,2) },{ $_.Name.Substring($_.Name.Length-21,2) } | % {   
-    # Set host into maintenance mode and wait for VMs to be migrated off the host
-    do {
-        Start-Sleep -s 60
-    }
-    while (($_ | Get-Cluster | Get-VMHost | ? { $_.State -eq "Maintenance" -or $_.State -eq "Disconnected" -or $_.State -eq  "NotResponding" }).Count -ge 3)
-    $_ | Set-VMHost -State Maintenance -Evacuate:$true
-    $_ | Restart-VMHost -Confirm:$false
-}
-
-# Enable anti-affinity rules
-Get-Cluster | Get-DrsRule | where enabled -eq $false | Set-DrsRule -Enabled:$true -RunAsync
+    - name: Add MAC Pool
+      ucs_mac_pool:
+        ucs_ip: "{{ ucs_hostname }}"
+        ucs_username: "{{ ucs_username }}"
+        ucs_password: "{{ ucs_password }}"
+        name: "{{ item.name }}"
+        order: default
+        first_addr: "{{ item.from }}"
+        last_addr: "{{ item._to }}"
+      loop: "{{ mac_pools }}"
