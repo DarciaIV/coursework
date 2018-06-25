@@ -1,61 +1,31 @@
----
-- hosts: all
-  connection: local
-  gather_facts: no
-  tasks:
-    - name: Set site name
-      ucs_managed_objects:
-        ucs_ip: "{{ ucs_hostname }}"
-        ucs_username: "{{ ucs_username }}"
-        ucs_password: "{{ ucs_password }}"
-        objects:
-        - module: ucsmsdk.mometa.top.TopSystem
-          class: TopSystem
-          properties:
-            parent_mo_or_dn: sys
-            name: "{{ name }}"
-            descr: "{{ description }}"
-            owner: Here will be owner
-            site: "{{ site }}"
+ # Get current AD site
 
-    - name: Add NTP Server
-      cisco_ucs_ntp:
-        ucs_ip: "{{ ucs_hostname }}"
-        ucs_username: "{{ ucs_username }}"
-        ucs_password: "{{ ucs_password }}"
-        name: "{{ item }}"
-      loop: "{{ ntps }}"
 
-    - name: Add DNS Server
-      cisco_ucs_dns:
-        ucs_ip: "{{ ucs_hostname }}"
-        ucs_username: "{{ ucs_username }}"
-        ucs_password: "{{ ucs_password }}"
-        name: "{{ item }}"
-      loop: "{{ dnss }}"
+$DCs = "AKL1", "CHC1", "CHI2", "COP2", "DAL1", "FRA2", "HKG3", "LON4", "LON5", "LRK1", "MIA2", "PAR2", "SAO2", "SCS2", "SIN4", "SJL1", "SYD3", "TOK2", "TOR1", "WDC1"
 
-    - name: Add IP Pool
-      ucs_ip_pool:
-        ucs_ip: "{{ ucs_hostname }}"
-        ucs_username: "{{ ucs_username }}"
-        ucs_password: "{{ ucs_password }}"
-        name: "{{ item.name }}"
-        order: default
-        first_addr: "{{ item.from }}"
-        last_addr: "{{ item.to }}"
-        subnet_mask: "{{ item.subnet }}"
-        default_gw: "{{ item.gateway }}"
-        primary_dns: "{{ item.primary_dns }}"
-        secondary_dns: "{{ item.secondary_dns }}"
-      loop: "{{ ip_pools }}"
 
-    - name: Add MAC Pool
-      ucs_mac_pool:
-        ucs_ip: "{{ ucs_hostname }}"
-        ucs_username: "{{ ucs_username }}"
-        ucs_password: "{{ ucs_password }}"
-        name: "{{ item.name }}"
-        order: default
-        first_addr: "{{ item.from }}"
-        last_addr: "{{ item._to }}"
-      loop: "{{ mac_pools }}"
+
+$creds = Get-Credential
+
+
+
+foreach ($dc in $DCs) {
+
+
+
+    # Connect to vCenter
+
+
+    Connect-VIServer prod-vsv-$dc-1.vm.ironport.com -Credential $creds
+
+
+    echo [ $dc ]
+
+
+    Get-VMHost | where name -like "prod-esx-$DC-01-c1*" | Get-VMHostService | Where-Object {$_.key -eq "ntpd"} | select vmhost, label, Key, Policy, Running, Required | format-table -AutoSize
+
+
+    Disconnect-VIServer -Confirm:$false
+
+
+    } 
